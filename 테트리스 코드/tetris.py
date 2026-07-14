@@ -44,7 +44,6 @@ class Piece:
     def __init__(self, x, y):
         self.x = x
         self.y = y
-        # 무작위로 모양과 색상을 선택하여 세트로 매칭
         shape_idx = random.randint(0, len(SHAPES) - 1)
         self.shape = SHAPES[shape_idx]
         self.color = COLORS[shape_idx]
@@ -60,28 +59,24 @@ def check_collision(piece, grid, adj_x=0, adj_y=0, shape=None):
                 new_x = piece.x + c + adj_x
                 new_y = piece.y + r + adj_y
                 
-                # 가로 벽을 벗어나거나 바닥에 닿는 경우
                 if new_x < 0 or new_x >= GRID_WIDTH or new_y >= GRID_HEIGHT:
                     return True
-                # 이미 고정된 블록과 겹치는 경우
                 if new_y >= 0 and grid[new_y][new_x] != BLACK:
                     return True
     return False
 
 def clear_lines(grid):
     """꽉 찬 가로 줄을 지우고, 지운 줄 수만큼 점수를 계산하는 함수"""
-    # 검은색(빈 칸)이 하나라도 포함되어 있는 줄만 골라내어 남깁니다.
     new_grid = [row for row in grid if BLACK in row]
     cleared = GRID_HEIGHT - len(new_grid)
     
-    # 지워진 만큼 맨 위에 텅 빈 검은색 줄을 새로 채워 넣습니다.
     for _ in range(cleared):
         new_grid.insert(0, [BLACK for _ in range(GRID_WIDTH)])
         
     return new_grid, cleared
 
-def draw_window(screen, grid, current_piece, score):
-    """화면에 모든 그래픽(블록, 격자, 점수판)을 그려주는 함수"""
+def draw_window(screen, grid, current_piece, next_piece, score):
+    """화면에 모든 그래픽(블록, 격자, 점수판, 다음 블록 미리보기)을 그려주는 함수"""
     screen.fill(BLACK)
     
     # 1. 이미 바닥에 고정된 블록들 그리기
@@ -106,13 +101,31 @@ def draw_window(screen, grid, current_piece, score):
     # 게임 영역과 점수판의 경계선 그리기
     pygame.draw.line(screen, WHITE, (GRID_WIDTH * BLOCK_SIZE, 0), (GRID_WIDTH * BLOCK_SIZE, SCREEN_HEIGHT), 2)
     
-    # 4. 우측 점수판 표시
-    font = pygame.font.SysFont("malgungothic", 30) # 맥은 시스템 기본 폰트로 자동 매칭됨
+    # 4. 우측 상단 점수판 표시
+    font = pygame.font.SysFont("malgungothic", 30)
     score_label = font.render("SCORE", True, WHITE)
     score_val = font.render(str(score), True, WHITE)
     
-    screen.blit(score_label, (GRID_WIDTH * BLOCK_SIZE + 20, 50))
-    screen.blit(score_val, (GRID_WIDTH * BLOCK_SIZE + 20, 100))
+    screen.blit(score_label, (GRID_WIDTH * BLOCK_SIZE + 20, 20))
+    screen.blit(score_val, (GRID_WIDTH * BLOCK_SIZE + 20, 60))
+    
+    # 5. 다음 블록 미리보기(NEXT) 표시
+    next_label = font.render("NEXT", True, WHITE)
+    screen.blit(next_label, (GRID_WIDTH * BLOCK_SIZE + 20, 150))
+    
+    PREVIEW_BLOCK_SIZE = 20
+    if next_piece:
+        for r, row in enumerate(next_piece.shape):
+            for c, val in enumerate(row):
+                if val:
+                    pygame.draw.rect(
+                        screen, 
+                        next_piece.color, 
+                        (GRID_WIDTH * BLOCK_SIZE + 25 + c * PREVIEW_BLOCK_SIZE, 
+                         200 + r * PREVIEW_BLOCK_SIZE,
+                         PREVIEW_BLOCK_SIZE - 2, 
+                         PREVIEW_BLOCK_SIZE - 2)
+                    )
     
     pygame.display.update()
 
@@ -120,73 +133,79 @@ def main():
     screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
     pygame.display.set_caption("파이썬 클래식 테트리스")
     
-    # 게임판을 검은색 빈칸으로 가득 채워 초기화 (20행 10열)
+    # [신규 기능] 배경 음악(BGM) 오디오 믹서 초기화 및 재생
+    try:
+        pygame.mixer.init()
+        pygame.mixer.music.load("테트리스 코드/bgm.mp3")
+        pygame.mixer.music.play(-1)  # -1은 무한 반복 재생을 의미합니다.
+    except pygame.error:
+        print("안내: '테트리스 코드/bgm.mp3' 파일이 없어 오디오 없이 게임을 오프닝합니다.")
+    
     grid = [[BLACK for _ in range(GRID_WIDTH)] for _ in range(GRID_HEIGHT)]
     
     current_piece = Piece(GRID_WIDTH // 2 - 1, 0)
+    next_piece = Piece(GRID_WIDTH // 2 - 1, 0)
+    
     clock = pygame.time.Clock()
     fall_time = 0
     score = 0
     game_over = False
     
     while not game_over:
-        # 아래 화살표를 누르고 있으면 낙하 속도가 빨라집니다 (Soft Drop)
         keys = pygame.key.get_pressed()
         fall_speed = 0.05 if keys[pygame.K_DOWN] else 0.5
         
-        # 시간에 따른 자동 낙하 처리 (프레임 독립적 계산)
         fall_time += clock.tick(60) / 1000 
         if fall_time >= fall_speed:
             fall_time = 0
             if not check_collision(current_piece, grid, adj_y=1):
                 current_piece.y += 1
             else:
-                # 바닥이나 다른 블록에 닿으면 고정
                 for r, row in enumerate(current_piece.shape):
                     for c, val in enumerate(row):
                         if val and current_piece.y + r >= 0:
                             grid[current_piece.y + r][current_piece.x + c] = current_piece.color
                 
-                # 꽉 찬 줄 제거 및 점수 추가
                 grid, cleared_lines = clear_lines(grid)
                 score += cleared_lines * 100
                 
-                # 새로운 블록 생성
-                current_piece = Piece(GRID_WIDTH // 2 - 1, 0)
+                current_piece = next_piece
+                next_piece = Piece(GRID_WIDTH // 2 - 1, 0)
                 
-                # 새 블록이 나오자마자 충돌하면 게임 오버
                 if check_collision(current_piece, grid):
                     game_over = True
                     
-        # 키보드 입력 핸들러
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 game_over = True
                 
             if event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_LEFT: # 왼쪽 이동
+                if event.key == pygame.K_LEFT:
                     if not check_collision(current_piece, grid, adj_x=-1):
                         current_piece.x -= 1
-                elif event.key == pygame.K_RIGHT: # 오른쪽 이동
+                elif event.key == pygame.K_RIGHT:
                     if not check_collision(current_piece, grid, adj_x=1):
                         current_piece.x += 1
-                elif event.key == pygame.K_UP: # 90도 시계방향 회전
+                elif event.key == pygame.K_UP:
                     rotated_shape = [list(row) for row in zip(*current_piece.shape[::-1])]
                     if not check_collision(current_piece, grid, shape=rotated_shape):
                         current_piece.shape = rotated_shape
-                elif event.key == pygame.K_SPACE: # 즉시 떨어뜨리기 (Hard Drop)
+                elif event.key == pygame.K_SPACE:
                     while not check_collision(current_piece, grid, adj_y=1):
                         current_piece.y += 1
-                    fall_time = fall_speed # 다음 프레임에서 즉시 고정 단계를 유도
+                    fall_time = fall_speed
 
-        draw_window(screen, grid, current_piece, score)
+        draw_window(screen, grid, current_piece, next_piece, score)
         
-    # 게임이 끝났을 때 화면에 GAME OVER 출력
+    # 게임 오버 시 BGM 정지
+    if pygame.mixer.get_init():
+        pygame.mixer.music.stop()
+        
     font = pygame.font.SysFont("malgungothic", 40)
     over_text = font.render("GAME OVER", True, (255, 0, 0))
     screen.blit(over_text, (SCREEN_WIDTH // 4 - 20, SCREEN_HEIGHT // 2 - 20))
     pygame.display.update()
-    pygame.time.delay(2000) # 2초 대기 후 종료
+    pygame.time.delay(2000)
     pygame.quit()
 
 if __name__ == "__main__":
